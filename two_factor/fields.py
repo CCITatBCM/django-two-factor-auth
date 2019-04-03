@@ -1,7 +1,9 @@
 import copy
 
 from phonenumber_field.modelfields import PhoneNumberField
+from django.conf import settings
 
+from pfc import utils
 
 class EncryptedPhoneNumberField(PhoneNumberField):
     def from_db_value(self, value, expression, connection):
@@ -18,4 +20,4 @@ class EncryptedPhoneNumberField(PhoneNumberField):
 
         db_value = copy.deepcopy(value)
 
-        return utils.encrypt(db_value, settings.MASTER_KEY)
+        return utils.encrypt(str(db_value), settings.MASTER_KEY)
