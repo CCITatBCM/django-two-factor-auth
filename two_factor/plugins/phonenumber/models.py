@@ -10,6 +10,8 @@ from phonenumber_field.modelfields import PhoneNumberField
 
 from two_factor.gateways import make_call, send_sms
 
+from two_factor.fields import EncryptedPhoneNumberField
+
 PHONE_METHODS = (
     ('call', _('Phone Call')),
     ('sms', _('Text Message')),
@@ -28,7 +30,7 @@ class PhoneDevice(ThrottlingMixin, Device):
     class Meta:
         db_table = 'two_factor_phonedevice'
 
-    number = PhoneNumberField()
+    number = EncryptedPhoneNumberField()
     key = models.CharField(max_length=40,
                            validators=[key_validator],
                            default=random_hex,
