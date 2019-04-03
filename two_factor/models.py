@@ -13,6 +13,8 @@ from phonenumber_field.modelfields import PhoneNumberField
 
 from .gateways import make_call, send_sms
 
+from .fields import EncryptedPhoneNumberField
+
 try:
     import yubiotp
 except ImportError:
@@ -66,7 +68,7 @@ class PhoneDevice(Device):
     class Meta:
         app_label = 'two_factor'
 
-    number = PhoneNumberField()
+    number = EncryptedPhoneNumberField()
     key = models.CharField(max_length=40,
                            validators=[key_validator],
                            default=random_hex_str,
