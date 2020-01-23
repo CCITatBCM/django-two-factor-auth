@@ -1,11 +1,9 @@
-from __future__ import absolute_import, division, unicode_literals
-
 import logging
 from binascii import unhexlify
 
 from django.conf import settings
 from django.db import models
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django_otp.models import Device
 from django_otp.oath import totp
 from django_otp.util import hex_validator, random_hex
@@ -81,13 +79,6 @@ class PhoneDevice(Device):
             self.number,
             self.method,
         )
-
-    def __eq__(self, other):
-        if not isinstance(other, PhoneDevice):
-            return False
-        return self.number == other.number \
-            and self.method == other.method \
-            and self.key == other.key
 
     @property
     def bin_key(self):

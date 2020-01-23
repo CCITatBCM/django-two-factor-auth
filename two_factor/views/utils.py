@@ -2,7 +2,7 @@ import logging
 
 from django.core.exceptions import SuspiciousOperation
 from django.utils.decorators import method_decorator
-from django.utils.translation import ugettext as _
+from django.utils.translation import gettext as _
 from formtools.wizard.forms import ManagementForm
 from formtools.wizard.storage.session import SessionStorage
 from formtools.wizard.views import SessionWizardView
@@ -18,12 +18,12 @@ class ExtraSessionStorage(SessionStorage):
     validated_step_data_key = 'validated_step_data'
 
     def init_data(self):
-        super(ExtraSessionStorage, self).init_data()
+        super().init_data()
         self.data[self.validated_step_data_key] = {}
 
     def reset(self):
         if self.prefix in self.request.session:
-            super(ExtraSessionStorage, self).reset()
+            super().reset()
         else:
             self.init_data()
 
@@ -111,8 +111,8 @@ class IdempotentSessionWizardView(SessionWizardView):
             raise SuspiciousOperation(_('ManagementForm data is missing or has been tampered with'))
 
         form_current_step = management_form.cleaned_data['current_step']
-        if (form_current_step != self.steps.current and
-                self.storage.current_step is not None):
+        if (form_current_step != self.steps.current
+                and self.storage.current_step is not None):
             # form refreshed, change current step
             self.storage.current_step = form_current_step
         # -- End duplicated code from upstream
@@ -125,7 +125,7 @@ class IdempotentSessionWizardView(SessionWizardView):
                            self.steps.current)
             return self.render_goto_step(self.steps.all[-1])
 
-        return super(IdempotentSessionWizardView, self).post(*args, **kwargs)
+        return super().post(*args, **kwargs)
 
     def process_step(self, form):
         """
@@ -151,7 +151,7 @@ class IdempotentSessionWizardView(SessionWizardView):
         for next_step in keys[key:]:
             self.storage.validated_step_data.pop(next_step, None)
 
-        return super(IdempotentSessionWizardView, self).process_step(form)
+        return super().process_step(form)
 
     def render_done(self, form, **kwargs):
         """
