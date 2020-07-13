@@ -21,11 +21,6 @@ the below examples:
 
     $ pip install django-two-factor-auth[phonenumberslite]
 
-.. note::
-   django-phonenumber-field v3.0 and above does not support python 2.7 and 3.4,
-   you'll have to install 'django-phonenumber-field<3.0' manually if you're using
-   any of those versions of python.
-
 Setup
 -----
 
@@ -95,7 +90,7 @@ Add the following app to the ``INSTALLED_APPS``:
         'otp_yubikey',
     )
 
-This plugin also requires adding a validation service, through wich YubiKeys
+This plugin also requires adding a validation service, through which YubiKeys
 will be verified. Normally, you'd use the YubiCloud for this. In the Django
 admin, navigate to ``YubiKey validation services`` and add an item. Django
 Two-Factor Authentication will identify the validation service with the
