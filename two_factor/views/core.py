@@ -3,7 +3,6 @@ import time
 import warnings
 from base64 import b32encode
 from binascii import unhexlify
-from http import cookies
 from uuid import uuid4
 
 import django_otp
@@ -33,9 +32,10 @@ from django.views.generic.base import View
 from django_otp import devices_for_user
 from django_otp.decorators import otp_required
 from django_otp.plugins.otp_static.models import StaticDevice, StaticToken
+from django_otp.util import random_hex
 
 from two_factor import signals
-from two_factor.models import get_available_methods, random_hex_str
+from two_factor.models import get_available_methods
 from two_factor.utils import totp_digits
 
 from ..forms import (
@@ -148,6 +148,11 @@ class LoginView(SuccessURLAllowedHostsMixin, IdempotentSessionWizardView):
         """
         Login the user and redirect to the desired page.
         """
+
+        # Check if remember cookie should be set after login
+        current_step_data = self.storage.get_step_data(self.steps.current)
+        remember = bool(current_step_data and current_step_data.get('token-remember') == 'on')
+
         login(self.request, self.get_user())
 
         redirect_to = self.get_success_url()
@@ -160,31 +165,20 @@ class LoginView(SuccessURLAllowedHostsMixin, IdempotentSessionWizardView):
                                        user=self.get_user(), device=device)
 
             # Set a remember cookie if activated
-            form_obj = self.get_form(step=self.steps.current, data=self.storage.get_step_data(self.steps.current))
-            if getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_AGE', None) and \
-                    'remember' in form_obj.fields and form_obj['remember'].value():
+
+            if getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_AGE', None) and remember:
                 # choose a unique cookie key to remember devices for multiple users in the same browser
                 cookie_key = REMEMBER_COOKIE_PREFIX + str(uuid4())
                 cookie_value = get_remember_device_cookie(user=self.get_user(),
                                                           otp_device_id=device.persistent_id)
-                if 'samesite' in cookies.Morsel._reserved:
-                    response.set_cookie(cookie_key, cookie_value,
-                                        max_age=settings.TWO_FACTOR_REMEMBER_COOKIE_AGE,
-                                        domain=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_DOMAIN', None),
-                                        path=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_PATH', '/'),
-                                        secure=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_SECURE', False),
-                                        httponly=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_HTTPONLY', True),
-                                        samesite=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_SAMESITE', 'Lax'),
-                                        )
-                else:
-                    # Backwards compatibility for Django < 2.1a1
-                    response.set_cookie(cookie_key, cookie_value,
-                                        max_age=settings.TWO_FACTOR_REMEMBER_COOKIE_AGE,
-                                        domain=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_DOMAIN', None),
-                                        path=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_PATH', '/'),
-                                        secure=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_SECURE', False),
-                                        httponly=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_HTTPONLY', True),
-                                        )
+                response.set_cookie(cookie_key, cookie_value,
+                                    max_age=settings.TWO_FACTOR_REMEMBER_COOKIE_AGE,
+                                    domain=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_DOMAIN', None),
+                                    path=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_PATH', '/'),
+                                    secure=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_SECURE', False),
+                                    httponly=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_HTTPONLY', True),
+                                    samesite=getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_SAMESITE', 'Lax'),
+                                    )
 
         return response
 
@@ -543,7 +537,7 @@ class SetupView(IdempotentSessionWizardView):
         self.storage.extra_data.setdefault('keys', {})
         if step in self.storage.extra_data['keys']:
             return self.storage.extra_data['keys'].get(step)
-        key = random_hex_str(20)
+        key = random_hex(20)
         self.storage.extra_data['keys'][step] = key
         return key
 
@@ -673,7 +667,7 @@ class PhoneSetupView(IdempotentSessionWizardView):
         The key is preserved between steps and stored as ascii in the session.
         """
         if self.key_name not in self.storage.extra_data:
-            key = random_hex_str(20)
+            key = random_hex(20)
             self.storage.extra_data[self.key_name] = key
         return self.storage.extra_data[self.key_name]
 

@@ -85,6 +85,11 @@ General Settings
   audience is a certain country, setting the region to that country allows
   entering phone numbers without that country's country code.
 
+``TWO_FACTOR_PHONE_THROTTLE_FACTOR`` (default: ``1``)
+  This controls the rate of throttling. The sequence of 1, 2, 4, 8... seconds is
+  multiplied by this factor to define the delay imposed after 1, 2, 3, 4...
+  successive failures. Set to ``0`` to disable throttling completely.
+
 Twilio Gateway
 --------------
 To use the Twilio gateway, you need first to install the `Twilio client`_:
@@ -100,7 +105,7 @@ Next, add additional urls to your config:
     # urls.py
     from two_factor.gateways.twilio.urls import urlpatterns as tf_twilio_urls
     urlpatterns = [
-        url(r'', include(tf_twilio_urls)),
+        path('', include(tf_twilio_urls)),
         ...
     ]
 

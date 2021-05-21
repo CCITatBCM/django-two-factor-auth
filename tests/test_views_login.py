@@ -9,8 +9,7 @@ from django.test.utils import override_settings
 from django.urls import reverse
 from django_otp import DEVICE_ID_SESSION_KEY
 from django_otp.oath import totp
-
-from two_factor.models import random_hex_str
+from django_otp.util import random_hex
 
 from .utils import UserMixin
 
@@ -95,7 +94,7 @@ class LoginTest(UserMixin, TestCase):
         mock_time.time.return_value = 12345.12
         user = self.create_user()
         user.totpdevice_set.create(name='default',
-                                   key=random_hex_str())
+                                   key=random_hex())
 
         response = self._post({'auth-username': 'bouke@example.com',
                                'auth-password': 'secret',
@@ -113,7 +112,7 @@ class LoginTest(UserMixin, TestCase):
         mock_time.time.return_value = 12345.12
         user = self.create_user()
         user.totpdevice_set.create(name='default',
-                                   key=random_hex_str())
+                                   key=random_hex())
 
         response = self._post({'auth-username': 'bouke@example.com',
                                'auth-password': 'secret',
@@ -132,7 +131,7 @@ class LoginTest(UserMixin, TestCase):
         mock_time.time.return_value = 12345.12
         user = self.create_user()
         device = user.totpdevice_set.create(name='default',
-                                            key=random_hex_str())
+                                            key=random_hex())
 
         response = self._post({'auth-username': 'bouke@example.com',
                                'auth-password': 'secret',
@@ -165,7 +164,7 @@ class LoginTest(UserMixin, TestCase):
         mock_time.time.return_value = 12345.12
         user = self.create_user()
         device = user.totpdevice_set.create(name='default',
-                                            key=random_hex_str())
+                                            key=random_hex())
 
         response = self._post({'auth-username': 'bouke@example.com',
                                'auth-password': 'secret',
@@ -210,12 +209,15 @@ class LoginTest(UserMixin, TestCase):
     def test_with_generator(self, mock_signal):
         user = self.create_user()
         device = user.totpdevice_set.create(name='default',
-                                            key=random_hex_str())
+                                            key=random_hex())
 
         response = self._post({'auth-username': 'bouke@example.com',
                                'auth-password': 'secret',
                                'login_view-current_step': 'auth'})
         self.assertContains(response, 'Token:')
+        self.assertContains(response, 'autofocus="autofocus"')
+        self.assertContains(response, 'inputmode="numeric"')
+        self.assertContains(response, 'autocomplete="one-time-code"')
 
         response = self._post({'token-otp_token': '123456',
                                'login_view-current_step': 'token'})
@@ -240,7 +242,7 @@ class LoginTest(UserMixin, TestCase):
     def test_throttle_with_generator(self, mock_signal):
         user = self.create_user()
         device = user.totpdevice_set.create(name='default',
-                                            key=random_hex_str())
+                                            key=random_hex())
 
         self._post({'auth-username': 'bouke@example.com',
                     'auth-password': 'secret',
@@ -265,11 +267,11 @@ class LoginTest(UserMixin, TestCase):
         user = self.create_user()
         for no_digits in (6, 8):
             with self.settings(TWO_FACTOR_TOTP_DIGITS=no_digits):
-                user.totpdevice_set.create(name='default', key=random_hex_str(),
+                user.totpdevice_set.create(name='default', key=random_hex(),
                                            digits=no_digits)
                 device = user.phonedevice_set.create(name='backup', number='+31101234567',
                                                      method='sms',
-                                                     key=random_hex_str())
+                                                     key=random_hex())
 
                 # Backup phones should be listed on the login form
                 response = self._post({'auth-username': 'bouke@example.com',
@@ -322,7 +324,7 @@ class LoginTest(UserMixin, TestCase):
     @mock.patch('two_factor.views.core.signals.user_verified.send')
     def test_with_backup_token(self, mock_signal):
         user = self.create_user()
-        user.totpdevice_set.create(name='default', key=random_hex_str())
+        user.totpdevice_set.create(name='default', key=random_hex())
         device = user.staticdevice_set.create(name='backup')
         device.token_set.create(token='abcdef123')
 
@@ -418,6 +420,28 @@ class LoginTest(UserMixin, TestCase):
 
         self.assertNotIn('secret', session_contents)
 
+    def test_login_different_user_with_otp_on_existing_session(self):
+        self.create_user()
+        vedran_user = self.create_user(username='vedran@example.com')
+        device = vedran_user.totpdevice_set.create(name='default',
+                                            key=random_hex())
+
+        response = self._post({'auth-username': 'bouke@example.com',
+                               'auth-password': 'secret',
+                               'login_view-current_step': 'auth'})
+        self.assertRedirects(response,
+                             resolve_url(settings.LOGIN_REDIRECT_URL))
+
+        response = self._post({'auth-username': 'vedran@example.com',
+                               'auth-password': 'secret',
+                               'login_view-current_step': 'auth'})
+        self.assertContains(response, 'Token:')
+        response = self._post({'token-otp_token': totp(device.bin_key),
+                               'login_view-current_step': 'token',
+                               'token-remember': 'on'})
+        self.assertRedirects(response,
+                             resolve_url(settings.LOGIN_REDIRECT_URL))
+
 
 class BackupTokensTest(UserMixin, TestCase):
     def setUp(self):
@@ -450,13 +474,33 @@ class BackupTokensTest(UserMixin, TestCase):
                          response.context_data['device'].token_set.all()])
         self.assertNotEqual(first_set, second_set)
 
+    def test_no_cancel_url(self):
+        response = self.client.get(reverse('two_factor:login'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('cancel_url', response.context.keys())
+
+    @override_settings(LOGOUT_REDIRECT_URL='custom-field-name-login')
+    def test_cancel_redirects_to_logout_redirect_url(self):
+        response = self.client.get(reverse('two_factor:login'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['cancel_url'], reverse('custom-field-name-login'))
+
+    @override_settings(LOGOUT_URL='custom-field-name-login')
+    def test_logout_url_warning_raised(self):
+        with self.assertWarns(DeprecationWarning):
+            response = self.client.get(reverse('two_factor:login'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['cancel_url'], reverse('custom-field-name-login'))
+
+
 @override_settings(ROOT_URLCONF='tests.urls_admin')
 class RememberLoginTest(UserMixin, TestCase):
     def setUp(self):
         super().setUp()
         self.user = self.create_user()
         self.device = self.user.totpdevice_set.create(name='default',
-                                            key=random_hex_str())
+                                            key=random_hex())
+
     def _post(self, data=None):
         return self.client.post(reverse('two_factor:login'), data=data)
 
@@ -464,15 +508,12 @@ class RememberLoginTest(UserMixin, TestCase):
         for cookie in self.client.cookies:
             if cookie.startswith("remember-cookie_"):
                 self._restore_remember_cookie_data = dict(name=cookie, value=self.client.cookies[cookie].value)
-                self.client.cookies[cookie] = self.client.cookies[cookie].value[:-5] + "0"*5   # an invalid key
+                self.client.cookies[cookie] = self.client.cookies[cookie].value[:-5] + "0" * 5  # an invalid key
 
     def restore_remember_cookie(self):
         self.client.cookies[self._restore_remember_cookie_data['name']] = self._restore_remember_cookie_data['value']
 
-
-    @override_settings(
-        TWO_FACTOR_REMEMBER_COOKIE_AGE=60 * 60,
-    )
+    @override_settings(TWO_FACTOR_REMEMBER_COOKIE_AGE=60 * 60)
     def test_with_remember(self):
         # Login
         response = self._post({'auth-username': 'bouke@example.com',
@@ -498,9 +539,7 @@ class RememberLoginTest(UserMixin, TestCase):
         response = self.client.get('/secure/raises/')
         self.assertEqual(response.status_code, 200)
 
-    @override_settings(
-        TWO_FACTOR_REMEMBER_COOKIE_AGE=60*3,
-    )
+    @override_settings(TWO_FACTOR_REMEMBER_COOKIE_AGE=60 * 3)
     def test_with_remember_label_3_min(self):
         # Login
         response = self._post({'auth-username': 'bouke@example.com',
@@ -508,9 +547,7 @@ class RememberLoginTest(UserMixin, TestCase):
                                'login_view-current_step': 'auth'})
         self.assertContains(response, 'ask again on this device for 3 minutes')
 
-    @override_settings(
-        TWO_FACTOR_REMEMBER_COOKIE_AGE=60 * 60 * 4,
-    )
+    @override_settings(TWO_FACTOR_REMEMBER_COOKIE_AGE=60 * 60 * 4)
     def test_with_remember_label_4_hours(self):
         # Login
         response = self._post({'auth-username': 'bouke@example.com',
@@ -518,9 +555,7 @@ class RememberLoginTest(UserMixin, TestCase):
                                'login_view-current_step': 'auth'})
         self.assertContains(response, 'ask again on this device for 4 hours')
 
-    @override_settings(
-        TWO_FACTOR_REMEMBER_COOKIE_AGE=60 * 60 * 24 * 5,
-    )
+    @override_settings(TWO_FACTOR_REMEMBER_COOKIE_AGE=60 * 60 * 24 * 5)
     def test_with_remember_label_5_days(self):
         # Login
         response = self._post({'auth-username': 'bouke@example.com',
@@ -528,9 +563,7 @@ class RememberLoginTest(UserMixin, TestCase):
                                'login_view-current_step': 'auth'})
         self.assertContains(response, 'ask again on this device for 5 days')
 
-    @override_settings(
-        TWO_FACTOR_REMEMBER_COOKIE_AGE=60 * 60,
-    )
+    @override_settings(TWO_FACTOR_REMEMBER_COOKIE_AGE=60 * 60)
     def test_without_remember(self):
         # Login
         response = self._post({'auth-username': 'bouke@example.com',
@@ -554,9 +587,7 @@ class RememberLoginTest(UserMixin, TestCase):
 
         self.assertContains(response, 'Token:')
 
-    @override_settings(
-        TWO_FACTOR_REMEMBER_COOKIE_AGE=1,
-    )
+    @override_settings(TWO_FACTOR_REMEMBER_COOKIE_AGE=1)
     def test_expired(self):
         # Login
         response = self._post({'auth-username': 'bouke@example.com',
@@ -588,9 +619,7 @@ class RememberLoginTest(UserMixin, TestCase):
             for key, cookie in self.client.cookies.items()
         ))
 
-    @override_settings(
-        TWO_FACTOR_REMEMBER_COOKIE_AGE=60*60,
-    )
+    @override_settings(TWO_FACTOR_REMEMBER_COOKIE_AGE=60 * 60)
     def test_wrong_signature(self):
         # Login
         response = self._post({'auth-username': 'bouke@example.com',
@@ -638,7 +667,6 @@ class RememberLoginTest(UserMixin, TestCase):
         # Logout
         self.client.get(reverse('logout'))
 
-
         # Login having an invalid remember cookie
         self.set_invalid_remember_cookie()
         response = self._post({'auth-username': 'bouke@example.com',
@@ -665,6 +693,39 @@ class RememberLoginTest(UserMixin, TestCase):
                                'login_view-current_step': 'auth'})
         self.assertRedirects(response, reverse(settings.LOGIN_REDIRECT_URL), fetch_redirect_response=False)
 
+    @mock.patch('two_factor.gateways.fake.Fake')
+    @mock.patch('two_factor.views.core.signals.user_verified.send')
+    @override_settings(
+        TWO_FACTOR_SMS_GATEWAY='two_factor.gateways.fake.Fake',
+        TWO_FACTOR_CALL_GATEWAY='two_factor.gateways.fake.Fake',
+        TWO_FACTOR_REMEMBER_COOKIE_AGE=60 * 60,
+    )
+    def test_phonedevice_with_remember_cookie(self, mock_signal, fake):
+        self.user.totpdevice_set.first().delete()
+        device = self.user.phonedevice_set.create(name='default', number='+31101234567',
+                                             method='sms',)
 
+        # Ask for SMS challenge
+        response = self._post({'auth-username': 'bouke@example.com',
+                               'auth-password': 'secret',
+                               'login_view-current_step': 'auth'})
+        self.assertContains(response, 'We sent you a text message')
 
+        test_call_kwargs = fake.return_value.send_sms.call_args[1]
+        self.assertEqual(test_call_kwargs['device'], device)
 
+        # Valid token should be accepted.
+        response = self._post({'token-otp_token': totp(device.bin_key),
+                               'login_view-current_step': 'token',
+                               'token-remember': 'on'})
+        self.assertRedirects(response, resolve_url(settings.LOGIN_REDIRECT_URL))
+
+        # Logout
+        self.client.get(reverse('logout'))
+
+        # Ask for SMS challenge
+        response = self._post({'auth-username': 'bouke@example.com',
+                               'auth-password': 'secret',
+                               'login_view-current_step': 'auth'})
+
+        self.assertRedirects(response, resolve_url(settings.LOGIN_REDIRECT_URL))
