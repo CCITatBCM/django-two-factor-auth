@@ -12,7 +12,7 @@ from django.conf import settings
 from django.contrib.auth import REDIRECT_FIELD_NAME, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
-from django.contrib.auth.views import SuccessURLAllowedHostsMixin
+from django.contrib.auth.views import RedirectURLMixin
 from django.contrib.sites.shortcuts import get_current_site
 from django.core.signing import BadSignature
 from django.forms import Form, ValidationError
@@ -62,7 +62,7 @@ REMEMBER_COOKIE_PREFIX = getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_PREFIX', 
 
 @class_view_decorator(sensitive_post_parameters())
 @class_view_decorator(never_cache)
-class LoginView(SuccessURLAllowedHostsMixin, IdempotentSessionWizardView):
+class LoginView(RedirectURLMixin, IdempotentSessionWizardView):
     """
     View for handling the login process, including OTP verification.
 
