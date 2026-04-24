@@ -9,6 +9,7 @@ from uuid import uuid4
 import django_otp
 import qrcode
 import qrcode.image.svg
+from django.apps import apps
 from django.conf import settings
 from django.contrib.auth import REDIRECT_FIELD_NAME, login
 from django.contrib.auth.decorators import login_required
@@ -36,10 +37,9 @@ from django_otp.plugins.otp_static.models import StaticToken
 from django_otp.util import random_hex
 
 from two_factor import signals
-from two_factor.plugins.phonenumber.utils import get_available_phone_methods
 from two_factor.plugins.registry import MethodNotFoundError, registry
 from two_factor.utils import totp_digits
-from two_factor.views.mixins import OTPRequiredMixin
+from two_factor.views.mixins import DeviceContextDataMixin, OTPRequiredMixin
 
 from ..forms import (
     AuthenticationTokenForm, BackupTokenForm, DeviceValidationForm, MethodForm,
@@ -72,7 +72,7 @@ REMEMBER_COOKIE_PREFIX = getattr(settings, 'TWO_FACTOR_REMEMBER_COOKIE_PREFIX', 
     [login_not_required, sensitive_post_parameters(), csrf_protect, never_cache],
     name='dispatch'
 )
-class LoginView(RedirectURLMixin, IdempotentSessionWizardView):
+class LoginView(DeviceContextDataMixin, RedirectURLMixin, IdempotentSessionWizardView):
     """
     View for handling the login process, including OTP verification.
 
@@ -341,7 +341,7 @@ class LoginView(RedirectURLMixin, IdempotentSessionWizardView):
         if self.steps.current == self.TOKEN_STEP:
             form_with_errors = form and form.is_bound and not form.is_valid()
             if not form_with_errors:
-                self.get_device().generate_challenge()
+                self.generate_challenge_with_context(self.get_device())
         return super().render(form, **kwargs)
 
     def get_user(self):
@@ -427,7 +427,7 @@ class LoginView(RedirectURLMixin, IdempotentSessionWizardView):
 
 
 @method_decorator([never_cache, login_required], name='dispatch')
-class SetupView(RedirectURLMixin, IdempotentSessionWizardView):
+class SetupView(DeviceContextDataMixin, RedirectURLMixin, IdempotentSessionWizardView):
     """
     View for handling OTP setup using a wizard.
 
@@ -522,7 +522,7 @@ class SetupView(RedirectURLMixin, IdempotentSessionWizardView):
         next_step = self.steps.next
         if next_step == 'validation':
             try:
-                self.get_device().generate_challenge()
+                self.generate_challenge_with_context(self.get_device())
                 kwargs["challenge_succeeded"] = True
             except Exception:
                 logger.exception("Could not generate challenge")
@@ -548,6 +548,7 @@ class SetupView(RedirectURLMixin, IdempotentSessionWizardView):
         # PhoneNumberForm / YubiKeyDeviceForm / EmailForm / WebauthnDeviceValidationForm
         elif method.code in ('call', 'sms', 'yubikey', 'email', 'webauthn'):
             device = self.get_device()
+            device.confirmed = True
             device.save()
 
         django_otp.login(self.request, device)
@@ -681,9 +682,18 @@ class SetupCompleteView(TemplateView):
             return redirect(request.session.get('next'))
         return super().get(request, *args, **kwargs)
 
-    def get_context_data(self):
+    def get_context_data(self, **kwargs):
+        phone_methods = None
+        if (apps.is_installed("two_factor.plugins.phonenumber")):
+            from two_factor.plugins.phonenumber.utils import (
+                get_available_phone_methods,
+            )
+
+            phone_methods = get_available_phone_methods()
+
         return {
-            'phone_methods': get_available_phone_methods(),
+            **super().get_context_data(**kwargs),
+            "phone_methods": phone_methods,
         }
 
 
